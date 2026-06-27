@@ -6,7 +6,7 @@ class ImplantStatus(Enum):
     ACTIVE = 3
     TERMINATED = 4
 
-class TaskStatus(Enum):
+class JobStatus(Enum):
     QUEUED = 1
     PENDING = 2
     EXECUTING = 3
@@ -24,7 +24,7 @@ class JobType(Enum):
 class RequestType(Enum):
     REGISTER = 1
     TERMINATE = 2
-    GET_TASK = 3
+    GET_JOB = 3
     PUSH_START = 4
     PUSH_CHUNK = 5
     PUSH_END = 6
@@ -70,7 +70,7 @@ class Implant(db.Model):
     created = db.Column(db.DateTime, nullable=False, server_default=db.func.now())
     updated = db.Column(db.DateTime, nullable=False, server_default=db.func.now(), onupdate=db.func.now())
 
-    tasks = db.relationship('Task', back_populates='implant')
+    jobs = db.relationship('Job', back_populates='implant')
 
     def __init__(self, machine_guid='', hostname='', username='', operating_system='', arch='', internal_ips=None, external_ip='', integrity=''):
         guid = uuid.uuid4()
@@ -98,3 +98,140 @@ class Implant(db.Model):
             'created': self.created.isoformat(),
             'updated': self.updated.isoformat()
         }
+
+class PushFileChunk(db.Model):
+    __tablename__ = 'pushfilechunks'
+    id = db.Column(db.Integer, unique=True, primary_key=True)
+    data = db.Column(db.String)
+    pushfile_id = db.Column(db.String(8), db.ForeignKey('pushfiles.id'))
+    created = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), onupdate=db.func.now())
+
+    def __init__(self, data='', pushfile_id=''):
+        self.data = data
+        self.type = 1
+        self.pushfile_id = pushfile_id
+
+    def json(self):
+        return {
+            'id': self.id,
+            'data': self.data,
+            'pushfile_id': self.pushfile_id,
+            'created': self.created.isoformat(),
+            'updated': self.updated.isoformat()
+        }
+
+class PullFileChunk(db.Model):
+    __tablename__ = 'pullfilechunks'
+    id = db.Column(db.Integer, unique=True, primary_key=True)
+    data = db.Column(db.String)
+    pullfile_id = db.Column(db.String(8), db.ForeignKey('pullfiles.id'))
+    created = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), onupdate=db.func.now())
+
+    def __init__(self, data='', pullfile_id=''):
+        self.data = data
+        self.type = 2
+        self.pullfile_id = pullfile_id
+
+    def json(self):
+        return {
+            'id': self.id,
+            'data': self.data,
+            'pullfile_id': self.pullfile_id,
+            'created': self.created.isoformat(),
+            'updated': self.updated.isoformat()
+        }
+
+class PushFile(db.Model):
+    __tablename__ = 'pushfiles'
+    id = db.Column(db.String(8), unique=True, primary_key=True)
+    srv_path = db.Column(db.String, nullable=False)
+    path = db.Column(db.String)
+    type = db.Column(db.Integer)
+    chunks = db.relationship('PushFileChunk', backref='pushfile', lazy=True)
+    created = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), onupdate=db.func.now())
+
+    def __init__(self, srv_path='', path=''):
+        guid = uuid.uuid4()
+        self.id = str(guid)[0:8]
+        self.srv_path = srv_path
+        self.path = path
+        self.type = 1
+
+    def json(self):
+        return {
+            'id': self.id,
+            'filename': self.filename,
+            'srv_path': self.srv_path,
+            'path': self.path,
+            'created': self.created.isoformat(),
+            'updated': self.updated.isoformat()
+        }
+
+class PullFile(db.Model):
+    __tablename__ = 'pullfiles'
+    id = db.Column(db.String(8), unique=True, primary_key=True)
+    srv_path = db.Column(db.String, nullable=False)
+    path = db.Column(db.String)
+    type = db.Column(db.Integer)
+    chunks = db.relationship('PullFileChunk', backref='pullfile', lazy=True)
+    created = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), onupdate=db.func.now())
+
+    def __init__(self, srv_path='', path=''):
+        guid = uuid.uuid4()
+        self.id = str(guid)[0:8]
+        self.srv_path = srv_path
+        self.path = path
+        self.type = 2
+
+    def json(self):
+        return {
+            'id': self.id,
+            'filename': self.filename,
+            'srv_path': self.srv_path,
+            'path': self.path,
+            'created': self.created.isoformat(),
+            'updated': self.updated.isoformat()
+        }
+
+class Job(db.Model):
+    __tablename__ = 'jobs'
+    id = db.Column(db.String(8), unique=True, primary_key=True)
+    type = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.Integer, nullable=False)
+    input = db.Column(db.String)
+    result = db.Column(db.String)
+    implant_id = db.Column(db.String(8), db.ForeignKey('implants.id'))
+    pushfile_id = db.Column(db.String(8), db.ForeignKey('pushfiles.id'))
+    pullfile_id = db.Column(db.String(8), db.ForeignKey('pullfiles.id'))
+    created = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), onupdate=db.func.now())
+
+    implant = db.relationship('Implant', back_populates='jobs')
+
+    def __init__(self, status=0, type=0, input='', result='', implant_id=''):
+        guid = uuid.uuid4()
+        self.id = str(guid)[0:8]
+        self.status = status
+        self.type = type
+        self.input = input
+        self.result = result
+        self.implant_id = implant_id
+
+    def json(self):
+        return {
+            'id': self.id,
+            'type': JobType(self.type).name,
+            'status': JobStatus(self.status).name,
+            'input': self.input,
+            'result': self.result,
+            'implant_id': self.implant_id,
+            'pushfile_id': self.pushfile_id,
+            'pullfile_id': self.pullfile_id,
+            'created': self.created.isoformat(),
+            'updated': self.updated.isoformat()
+        }
+
